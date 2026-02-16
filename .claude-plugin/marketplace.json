@@ -1,0 +1,14 @@
+{
+  "name": "idf-marketplace",
+  "owner": {
+    "name": "fhrbata"
+  },
+  "plugins": [
+    {
+      "name": "idf",
+      "source": "./plugins/idf",
+      "description": "Claude Code plugin with commands and tools for ESP-IDF development",
+      "version": "0.5.0"
+    }
+  ]
+}
