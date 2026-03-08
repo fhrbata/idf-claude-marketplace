@@ -1,4 +1,5 @@
 ---
+description: Review all staged and unstaged changes in the working tree.
 invoke: user
 ---
 

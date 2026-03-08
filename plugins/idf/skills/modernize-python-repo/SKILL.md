@@ -1,5 +1,4 @@
 ---
-name: modernize-python-repo
 description: Guides modernization of Python repositories: pyproject.toml migration, Ruff adoption, config consolidation, CI/CD and Danger workflow updates (GitHub and GitLab). Use when modernizing a Python repo, migrating from setup.py, adopting Ruff, updating Espressif GitHub/GitLab workflows, or migrating from espressif/github-actions/danger_pr_review to shared-github-dangerjs.
 invoke: user
 ---

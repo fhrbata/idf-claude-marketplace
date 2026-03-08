@@ -1,4 +1,5 @@
 ---
+description: Review a merge request (GitLab) or pull request (GitHub) by URL.
 invoke: user
 ---
 

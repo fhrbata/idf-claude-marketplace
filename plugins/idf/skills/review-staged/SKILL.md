@@ -1,4 +1,5 @@
 ---
+description: Review only staged (git added) changes before committing.
 invoke: user
 ---
 
