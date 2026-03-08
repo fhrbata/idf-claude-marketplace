@@ -30,8 +30,9 @@ The script prints the path to the output JSON file on stdout. The file contains 
 
 ## Step 2: Read the activity data and generate the report
 
-Read the ENTIRE JSON file produced by step 1 using the file read tool (not the terminal).
+Read the JSON file produced by step 1 using the file read tool (not the terminal).
 The file can be large — you MUST read all of it to produce a complete report.
+If the file exceeds 2000 lines, paginate: read the first 2000 lines, then use `offset` to read subsequent chunks (e.g., offset=2001, limit=2000) until you reach the end. Combine all chunks before generating the report.
 
 Then write a weekly status report following these rules:
 
