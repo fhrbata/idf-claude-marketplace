@@ -1,6 +1,7 @@
 ---
 description: Generate a weekly status report from GitHub and GitLab activity. Use when the user asks for a status report, weekly summary, or activity report.
 invoke: user
+model: claude-sonnet-4-6
 ---
 
 # Status Report
