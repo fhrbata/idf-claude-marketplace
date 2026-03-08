@@ -1,3 +1,7 @@
+---
+invoke: user
+---
+
 Review changes between two branches before creating a merge request or pull request.
 
 **Arguments**: $ARGUMENTS

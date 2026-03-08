@@ -1,3 +1,7 @@
+---
+invoke: user
+---
+
 Review all staged and unstaged changes on the current branch.
 
 ## Instructions

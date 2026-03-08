@@ -1,3 +1,7 @@
+---
+invoke: user
+---
+
 Review a merge request (GitLab) or pull request (GitHub) by URL.
 
 **URL**: $ARGUMENTS

@@ -1,3 +1,7 @@
+---
+invoke: user
+---
+
 Review only the staged changes (what would be included in the next commit).
 
 ## Instructions

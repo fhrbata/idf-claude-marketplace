@@ -1,6 +1,6 @@
 # IDF — Claude Code Marketplace for ESP-IDF Development
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin marketplace with tools for ESP-IDF development.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin marketplace with skills for ESP-IDF development.
 
 ## Installation
 
@@ -35,26 +35,34 @@ Then in Claude Code:
 ```
 idf-claude-marketplace/
 ├── .claude-plugin/
-│   └── marketplace.json          ← Marketplace catalog
+│   └── marketplace.json                    ← Marketplace catalog
 ├── plugins/
 │   └── idf/
 │       ├── .claude-plugin/
-│       │   └── plugin.json       ← Plugin manifest
-│       ├── commands/
-│       │   ├── review-branch.md  ← Review changes between branches (pre-MR/PR)
-│       │   ├── review-changes.md ← Review staged + unstaged changes
-│       │   ├── review-mr.md     ← Review a MR/PR by URL
-│       │   ├── review-staged.md  ← Review only staged changes
+│       │   └── plugin.json                 ← Plugin manifest
+│       ├── skills/
+│       │   ├── review-changes/
+│       │   │   └── SKILL.md
+│       │   ├── review-staged/
+│       │   │   └── SKILL.md
+│       │   ├── review-branch/
+│       │   │   └── SKILL.md
+│       │   ├── review-mr/
+│       │   │   └── SKILL.md
+│       │   ├── modernize-python-repo/
+│       │   │   └── SKILL.md
+│       │   └── status-report/
+│       │       ├── SKILL.md
+│       │       └── scripts/
+│       │           └── report.py           ← Data collection script
 │       └── CLAUDE.md
 ├── README.md
 └── .gitignore
 ```
 
-## Plugins
+## Skills
 
-### idf
-
-Commands for ESP-IDF code review.
+### Code Review
 
 #### `/idf:review-changes`
 
@@ -91,12 +99,36 @@ Reviews a merge request (GitLab) or pull request (GitHub) by URL. Fetches the di
 /idf:review-mr https://github.com/org/repo/pull/123
 ```
 
+### Python Modernization
+
+#### `/idf:modernize-python-repo`
+
+Guides modernization of Python repositories: pyproject.toml migration, Ruff adoption, config consolidation, CI/CD and Danger workflow updates (GitHub and GitLab).
+
+```
+/idf:modernize-python-repo
+```
+
+### Status Report
+
+#### `/idf:status-report`
+
+Collects activity data from GitHub and GitLab APIs, then generates a formatted weekly status report.
+
+```
+/idf:status-report
+/idf:status-report --days 14
+```
+
+Requires configuration — see the [skill SKILL.md](plugins/idf/skills/status-report/SKILL.md) for setup instructions.
+
 ## Requirements
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
 - `git`
 - `gh` (GitHub CLI) — for reviewing GitHub pull requests
 - `glab` (GitLab CLI) — for reviewing GitLab merge requests
+- `python3` + `requests` — for the status-report skill
 
 ## License
 
