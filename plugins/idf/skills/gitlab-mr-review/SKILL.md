@@ -64,6 +64,7 @@ You may ONLY use glab for the operations listed below. Any other glab usage is s
    - **Error Handling**: Swallowed exceptions, missing error paths, resource leaks.
    - **Readability**: Unclear naming, overly complex logic.
    - **Best Practices**: Framework/language idioms, deprecated APIs, missing tests.
+   - **Migration correctness**: When a change replaces a forgiving/lenient operation with a stricter one, verify that existing arguments and values are actually valid — don't assume correctness just because the old code "worked."
 
 ### Phase 2: Present Findings for Approval
 

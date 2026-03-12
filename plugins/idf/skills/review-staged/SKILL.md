@@ -21,6 +21,7 @@ Review only the staged changes (what would be included in the next commit).
 - **Error Handling**: Swallowed exceptions, missing error paths, unhelpful error messages, resource leaks.
 - **Readability**: Unclear naming, overly complex logic, missing context for non-obvious code.
 - **Best Practices**: Framework/language idioms, deprecated API usage, missing tests for new logic.
+- **Migration correctness**: When a change replaces a forgiving/lenient operation with a stricter one, verify that existing arguments and values are actually valid — don't assume correctness just because the old code "worked."
 
 ### Output Format
 
