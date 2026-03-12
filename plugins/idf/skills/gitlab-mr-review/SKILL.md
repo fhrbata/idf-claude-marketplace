@@ -16,14 +16,23 @@ You may ONLY use glab for the operations listed below. Any other glab usage is s
 - `glab mr diff <number> --repo <owner>/<repo>`
 - `glab api "projects/<id>/merge_requests/<iid>/versions"`
 - `glab api "projects/<id>/merge_requests/<iid>/draft_notes"`
-- `glab api "projects/<url_encoded_path>" --jq '.id'`
+- `glab api "projects/<url_encoded_path>" | jq -r '.id'`
 
 **Write operations** (for managing draft comments only, and ONLY after user approval):
-- `glab api --method POST "projects/<id>/merge_requests/<iid>/draft_notes" ...` — create a draft comment
-- `glab api --method PUT "projects/<id>/merge_requests/<iid>/draft_notes/<note_id>" ...` — update a draft comment
+- `glab api --method POST "projects/<id>/merge_requests/<iid>/draft_notes" --input <json_file> -H "Content-Type: application/json"` — create a draft comment
+- `glab api --method PUT "projects/<id>/merge_requests/<iid>/draft_notes/<note_id>" -f note="<text>"` — update a draft comment
 - `glab api --method DELETE "projects/<id>/merge_requests/<iid>/draft_notes/<note_id>"` — delete a draft comment
 
 **NEVER use glab for**: merge, close, reopen, approve, revoke, publish, bulk_publish, or any operation outside of draft_notes management.
+
+## Important: glab CLI notes
+
+- **No `--jq` flag**: glab does not support `--jq`. Pipe output through `jq` instead:
+  ```
+  glab api "projects/<url_encoded_path>" | jq -r '.id'
+  ```
+- **No `--hostname` flag for `glab api`**: glab resolves the GitLab host from its config file (`~/.config/glab-cli/config.yml`). Do NOT pass `--hostname` to `glab api`. The `--hostname` flag is only for `glab mr` subcommands if needed, but typically the configured host is sufficient.
+- **Nested JSON fields**: The `-f` flag creates flat key-value string parameters. It does NOT support nested field syntax like `-f "position[base_sha]=..."`. For nested JSON (e.g., draft note positions), you MUST use `--input` with a JSON file and `-H "Content-Type: application/json"`. See Phase 3 for the exact pattern.
 
 ## Instructions
 
@@ -35,12 +44,12 @@ You may ONLY use glab for the operations listed below. Any other glab usage is s
 
 2. **Resolve the project ID** (needed for API calls):
    - URL-encode the project path (replace `/` with `%2F`).
-   - Fetch the numeric ID:
+   - Fetch the numeric ID by piping through `jq`:
      ```
-     glab api "projects/<url_encoded_path>" --jq '.id'
+     glab api "projects/<url_encoded_path>" | jq -r '.id'
      ```
 
-3. **Fetch MR metadata and diff**:
+3. **Fetch MR metadata and diff** (can be run in parallel):
    ```
    glab mr view <number> --repo <owner>/<repo>
    glab mr diff <number> --repo <owner>/<repo>
@@ -85,29 +94,49 @@ You may ONLY use glab for the operations listed below. Any other glab usage is s
 
 8. **Fetch MR version SHAs** (needed for inline draft comments):
    ```
-   glab api "projects/<project_id>/merge_requests/<mr_iid>/versions"
+   glab api "projects/<project_id>/merge_requests/<mr_iid>/versions" | jq '.[0]'
    ```
    Use the latest version's `base_commit_sha`, `start_commit_sha`, and `head_commit_sha`.
 
 9. **Create approved draft comments** on the MR:
 
-   - For **general draft comments** (not tied to a specific line):
+   IMPORTANT: For ALL draft comments (both general and inline), you MUST write a JSON file and use `--input` with `-H "Content-Type: application/json"`. The `-f` flag does NOT support nested fields like `position` and will silently produce broken comments that appear at the bottom of the MR instead of inline in the diff.
+
+   - For **general draft comments** (not tied to a specific line), write a JSON file:
+     ```json
+     {
+       "note": "<comment text>"
+     }
+     ```
+     Then create the draft:
      ```
      glab api --method POST "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" \
-       -f note="<comment>"
+       --input <json_file> -H "Content-Type: application/json"
      ```
 
-   - For **inline draft comments** (tied to a specific file and line in the diff):
+   - For **inline draft comments** (tied to a specific file and line in the diff), write a JSON file:
+     ```json
+     {
+       "note": "<comment text>",
+       "position": {
+         "base_sha": "<base_commit_sha>",
+         "start_sha": "<start_commit_sha>",
+         "head_sha": "<head_commit_sha>",
+         "position_type": "text",
+         "new_path": "<file_path>",
+         "new_line": <line_number_integer>
+       }
+     }
+     ```
+     Then create the draft:
      ```
      glab api --method POST "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" \
-       -f note="<comment>" \
-       -f "position[base_sha]=<base_sha>" \
-       -f "position[start_sha]=<start_sha>" \
-       -f "position[head_sha]=<head_sha>" \
-       -f "position[position_type]=text" \
-       -f "position[new_path]=<file_path>" \
-       -f "position[new_line]=<line_number>"
+       --input <json_file> -H "Content-Type: application/json"
      ```
+
+   **Line number**: `new_line` must be a line number that appears in the **new side** of the diff (a context line or an added `+` line). Use `old_line` instead for removed `-` lines. The line number must correspond to a line visible in the diff, otherwise GitLab will reject the position.
+
+   **Tip**: You can write multiple JSON files in parallel (one per comment) and then create the drafts in parallel for efficiency.
 
 10. **Report results**: List which draft comments were created successfully and note any failures. Remind the user to go to the MR page on GitLab to review the drafts and submit the review.
 
