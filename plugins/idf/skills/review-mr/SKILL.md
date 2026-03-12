@@ -31,18 +31,7 @@ Review a merge request (GitLab) or pull request (GitHub) by URL.
 
 4. **Read source files** from the target branch when you need more context to understand a change — do not review the diff in isolation.
 
-5. Provide a thorough code review organized by file, covering:
-
-### Review Criteria
-
-- **Correctness**: Logic errors, off-by-one errors, null/undefined handling, edge cases, race conditions.
-- **Security**: Injection vulnerabilities (SQL, XSS, command), hardcoded secrets, insecure defaults, improper input validation.
-- **Performance**: Unnecessary allocations, O(n²) where O(n) is possible, missing indexes, N+1 queries, blocking calls in async contexts.
-- **Error Handling**: Swallowed exceptions, missing error paths, unhelpful error messages, resource leaks.
-- **Readability**: Unclear naming, overly complex logic, missing context for non-obvious code.
-- **Best Practices**: Framework/language idioms, deprecated API usage, missing tests for new logic.
-- **Migration correctness**: When a change replaces a forgiving/lenient operation with a stricter one, verify that existing arguments and values are actually valid — don't assume correctness just because the old code "worked."
-- **MR Quality**: Commit message clarity, appropriate scope (not too large), test coverage for new code.
+5. Provide a thorough code review organized by file, following the Review Methodology and Review Criteria from the plugin guide (see `CLAUDE.md`). Additionally evaluate **MR Quality**: commit message clarity, appropriate scope, test coverage for new code.
 
 ### Output Format
 

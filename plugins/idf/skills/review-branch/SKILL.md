@@ -32,18 +32,7 @@ Review changes between two branches before creating a merge request or pull requ
    - Whether the scope is appropriate for a single MR/PR
    - Whether the changes are complete (no half-finished features, no leftover debug code)
 
-6. Provide a thorough code review organized by file, covering:
-
-### Review Criteria
-
-- **Correctness**: Logic errors, off-by-one errors, null/undefined handling, edge cases, race conditions.
-- **Security**: Injection vulnerabilities (SQL, XSS, command), hardcoded secrets, insecure defaults, improper input validation.
-- **Performance**: Unnecessary allocations, O(n²) where O(n) is possible, missing indexes, N+1 queries, blocking calls in async contexts.
-- **Error Handling**: Swallowed exceptions, missing error paths, unhelpful error messages, resource leaks.
-- **Readability**: Unclear naming, overly complex logic, missing context for non-obvious code.
-- **Best Practices**: Framework/language idioms, deprecated API usage, missing tests for new logic.
-- **Migration correctness**: When a change replaces a forgiving/lenient operation with a stricter one, verify that existing arguments and values are actually valid — don't assume correctness just because the old code "worked."
-- **MR/PR Readiness**: Commit history quality, appropriate scope, test coverage, no leftover debug code or TODOs.
+6. Provide a thorough code review organized by file, following the Review Methodology and Review Criteria from the plugin guide (see `CLAUDE.md`). Additionally evaluate **MR/PR Readiness**: commit history quality, appropriate scope, test coverage, no leftover debug code or TODOs.
 
 ### Output Format
 

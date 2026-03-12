@@ -57,14 +57,7 @@ You may ONLY use glab for the operations listed below. Any other glab usage is s
 
 4. **Read source files** from the target branch when you need more context — do not review the diff in isolation.
 
-5. **Analyze the diff** using these criteria:
-   - **Correctness**: Logic errors, off-by-one, null handling, edge cases, race conditions.
-   - **Security**: Injection vulnerabilities, hardcoded secrets, insecure defaults.
-   - **Performance**: Unnecessary allocations, algorithmic complexity, blocking calls.
-   - **Error Handling**: Swallowed exceptions, missing error paths, resource leaks.
-   - **Readability**: Unclear naming, overly complex logic.
-   - **Best Practices**: Framework/language idioms, deprecated APIs, missing tests.
-   - **Migration correctness**: When a change replaces a forgiving/lenient operation with a stricter one, verify that existing arguments and values are actually valid — don't assume correctness just because the old code "worked."
+5. **Analyze the diff** following the Review Methodology and Review Criteria from the plugin guide (see `CLAUDE.md`).
 
 ### Phase 2: Present Findings for Approval
 
