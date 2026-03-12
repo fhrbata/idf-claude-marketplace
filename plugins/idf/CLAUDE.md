@@ -10,9 +10,7 @@ Claude Code plugin with skills for ESP-IDF development.
 ## Available Skills
 
 ### Code Review
-- `/idf:review-changes` — Review staged and unstaged changes on the current branch
-- `/idf:review-staged` — Review only staged changes
-- `/idf:review-branch [base] [head]` — Review changes between two branches before creating an MR/PR
+- `/idf:review` — Review all local changes (working tree + staged + unpushed commits vs upstream)
 - `/idf:review-mr <URL>` — Review a GitHub PR or GitLab MR by URL
 
 ### Python Modernization
