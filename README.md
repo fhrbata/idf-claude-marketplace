@@ -41,13 +41,7 @@ idf-claude-marketplace/
 │       ├── .claude-plugin/
 │       │   └── plugin.json                 ← Plugin manifest
 │       ├── skills/
-│       │   ├── review-changes/
-│       │   │   └── SKILL.md
-│       │   ├── review-staged/
-│       │   │   └── SKILL.md
-│       │   ├── review-branch/
-│       │   │   └── SKILL.md
-│       │   ├── review-mr/
+│       │   ├── review/
 │       │   │   └── SKILL.md
 │       │   ├── modernize-python-repo/
 │       │   │   └── SKILL.md
@@ -64,39 +58,14 @@ idf-claude-marketplace/
 
 ### Code Review
 
-#### `/idf:review-changes`
+#### `/idf:review`
 
-Reviews all staged and unstaged changes on the current branch. Provides a comprehensive code review covering correctness, security, performance, code style, and more.
-
-```
-/idf:review-changes
-```
-
-#### `/idf:review-staged`
-
-Reviews only staged changes (what would be committed). Same review criteria as `review-changes`.
+Reviews code changes. Without arguments, reviews all local changes on the current branch — working tree, staged, and unpushed commits vs upstream. With a GitHub PR or GitLab MR URL, fetches and reviews that MR/PR, then offers to post findings as draft review comments.
 
 ```
-/idf:review-staged
-```
-
-#### `/idf:review-branch`
-
-Reviews changes between two branches before creating a merge request or pull request. Useful for a pre-submission review to catch issues early.
-
-```
-/idf:review-branch                       # current branch vs default branch
-/idf:review-branch feature-xyz           # feature-xyz vs default branch
-/idf:review-branch main feature-xyz      # feature-xyz vs main
-```
-
-#### `/idf:review-mr`
-
-Reviews a merge request (GitLab) or pull request (GitHub) by URL. Fetches the diff and provides a full review.
-
-```
-/idf:review-mr https://gitlab.com/org/repo/-/merge_requests/42
-/idf:review-mr https://github.com/org/repo/pull/123
+/idf:review                                                    # review local changes
+/idf:review https://github.com/org/repo/pull/123               # review a GitHub PR
+/idf:review https://gitlab.com/org/repo/-/merge_requests/42    # review a GitLab MR
 ```
 
 ### Python Modernization
