@@ -28,7 +28,7 @@ bash <skill-directory>/scripts/commit-desc.sh [range]
 
 Where `[range]` is the revision range from Step 1 (e.g., `origin/master..`). If using the default upstream, omit the argument and let the script auto-detect.
 
-Capture the full output — this is the **Detailed commit description** section.
+Capture the full output exactly as printed — this is the **Detailed commit description** section. The output is already valid markdown (bullet items with linked commit subjects, indented body text). Do NOT reformat, rewrite, summarize, or re-interpret it in any way.
 
 ## Step 3: Understand the changes
 
@@ -54,7 +54,9 @@ understand the scope and motivation without reading every commit.>
 
 ## Detailed commit description
 
-<Output from Step 2 — the script output verbatim, do not modify it.>
+<Paste the EXACT output from Step 2 here, character for character.
+Do NOT reformat, summarize, convert to bullet lists, strip markdown links,
+or modify the output in any way. The script already produces valid markdown.>
 ```
 
 ### Summary writing guidelines
@@ -67,4 +69,30 @@ understand the scope and motivation without reading every commit.>
 
 ## Step 5: Present the result
 
-Output the generated MR description. The user can then copy it into their MR.
+Output the entire MR description inside a single markdown fenced code block so the user can copy the raw markdown directly. Use a plain code fence (triple backticks with no language tag) to prevent any rendering or interpretation of the content.
+
+Example output structure:
+
+````
+```
+## Summary
+
+...summary text...
+
+## Detailed commit description
+
+* [commit subject](https://...)
+
+    commit body...
+
+* [another commit](https://...)
+
+    commit body...
+```
+````
+
+Before the code block, suggest a concise MR title (under 72 characters) that captures the main purpose of the changes. Format it as:
+
+**Suggested MR title:** `<title>`
+
+After the code block, ask the user if they want to save it to a file (e.g., `mr.md` in the current directory).
