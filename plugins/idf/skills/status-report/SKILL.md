@@ -64,9 +64,9 @@ Settings are loaded from a config file (`[status-report]` section), and can be o
 
 | Platform | Path |
 |----------|------|
-| Linux | `~/.config/idf-tools-cursor-skills/config.ini` |
-| macOS | `~/Library/Application Support/idf-tools-cursor-skills/config.ini` |
-| Windows | `%APPDATA%\idf-tools-cursor-skills\config.ini` |
+| Linux | `~/.config/idf-claude-marketplace/config.ini` |
+| macOS | `~/Library/Application Support/idf-claude-marketplace/config.ini` |
+| Windows | `%APPDATA%\idf-claude-marketplace\config.ini` |
 
 Or set `IDF_TOOLS_SKILLS_CONFIG` env var to use a custom path.
 

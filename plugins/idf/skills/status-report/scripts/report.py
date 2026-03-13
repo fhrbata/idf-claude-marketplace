@@ -16,7 +16,7 @@ from pathlib import Path
 
 import requests
 
-APP_NAME = "idf-tools-cursor-skills"
+APP_NAME = "idf-claude-marketplace"
 CONFIG_SECTION = "status-report"
 
 CONFIG_KEYS = {
