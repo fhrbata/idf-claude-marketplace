@@ -7,7 +7,7 @@
     {
       "name": "idf",
       "source": "./plugins/idf",
-      "description": "Claude Code plugin with skills for ESP-IDF development: code review, Python repo modernization, and status reports",
+      "description": "Claude Code plugin with skills for ESP-IDF development: code review, MR descriptions, Python repo modernization, and status reports",
       "version": "0.6.0"
     }
   ]

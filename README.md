@@ -45,6 +45,10 @@ idf-claude-marketplace/
 │       │   │   └── SKILL.md
 │       │   ├── modernize-python-repo/
 │       │   │   └── SKILL.md
+│       │   ├── mr-desc/
+│       │   │   ├── SKILL.md
+│       │   │   └── scripts/
+│       │   │       └── commit-desc.sh      ← Commit description generator
 │       │   └── status-report/
 │       │       ├── SKILL.md
 │       │       └── scripts/
@@ -76,6 +80,17 @@ Guides modernization of Python repositories: pyproject.toml migration, Ruff adop
 
 ```
 /idf:modernize-python-repo
+```
+
+### MR Description
+
+#### `/idf:mr-desc`
+
+Generates a GitLab merge request description from the current branch. Analyzes all commits not present upstream, produces a summary of the changes, and appends a detailed commit description with linked commit subjects and full commit messages.
+
+```
+/idf:mr-desc                    # auto-detect upstream
+/idf:mr-desc origin/master..    # explicit range
 ```
 
 ### Status Report

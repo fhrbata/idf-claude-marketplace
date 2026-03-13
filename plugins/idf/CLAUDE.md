@@ -15,6 +15,9 @@ Claude Code plugin with skills for ESP-IDF development.
 ### Python Modernization
 - `/idf:modernize-python-repo` — Run the full Python repository modernization checklist
 
+### MR Description
+- `/idf:mr-desc [range]` — Generate a GitLab MR description from current branch commits (summary + detailed commit description)
+
 ### Status Report
 - `/idf:status-report` — Generate a weekly status report from GitHub and GitLab activity
 

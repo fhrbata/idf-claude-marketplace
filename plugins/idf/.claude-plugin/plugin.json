@@ -1,7 +1,7 @@
 {
   "name": "idf",
-  "description": "Claude Code plugin with skills for ESP-IDF development: code review, Python repo modernization, and status reports",
-  "version": "0.9.0",
+  "description": "Claude Code plugin with skills for ESP-IDF development: code review, MR descriptions, Python repo modernization, and status reports",
+  "version": "0.10.0",
   "author": {
     "name": "fhrbata"
   },
