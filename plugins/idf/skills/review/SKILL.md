@@ -53,8 +53,15 @@ Review code changes. Without arguments, reviews all local changes on the current
    - For GitHub:
      ```
      gh pr view <number> --repo <owner>/<repo> --json title,body,baseRefName,headRefName,files,additions,deletions
-     gh pr diff <number> --repo <owner>/<repo>
      ```
+     The diff from `gh pr diff` can be truncated for large changes. To get the full diff reliably, fetch the base and head SHAs and use git directly:
+     ```
+     gh api repos/<owner>/<repo>/pulls/<number> --jq '.base.sha, .head.sha'
+     git fetch origin <head_sha>
+     git diff <base_sha>..<head_sha> > /tmp/pr_diff.txt
+     ```
+     Then read the diff from the temp file. If the PR branch is not available locally, `git fetch origin <head_sha>` ensures it is fetched first.
+
    - For GitLab:
      ```
      glab mr view <number> --repo <owner>/<repo>
@@ -101,6 +108,12 @@ Start with an **Overview**:
 - **Local mode**: current branch → upstream branch, unpushed commits count, staged/unstaged file counts, brief summary
 - **MR/PR mode**: title and description summary, base ← head branch, files changed / lines added / lines removed
 
+Use the following severity levels:
+- `[critical]` — must fix before merge (bugs, security, data loss)
+- `[issue]` — should fix, likely a bug or significant problem
+- `[suggestion]` — improvement worth considering, not blocking
+- `[nitpick]` — style, wording, or minor preference, entirely optional
+
 Then for each issue found, present as a numbered list:
 
 ```
@@ -124,7 +137,7 @@ After presenting findings, offer to post them as draft review comments:
 - If the user declines, stop.
 
 **Let the user select comments to post**. They can:
-- **Approve all**: "approve" or "go ahead"
+- **Approve all**: "yes", "approve", or "go ahead"
 - **Approve specific ones**: "approve 1, 3, 5"
 - **Edit a comment**: "edit 2: change the message to ..."
 - **Remove a comment**: "remove 4"
@@ -140,7 +153,6 @@ Create a single pending review containing all approved inline comments in one AP
 
 ```json
 {
-  "event": "PENDING",
   "body": "",
   "comments": [
     {
@@ -151,6 +163,8 @@ Create a single pending review containing all approved inline comments in one AP
   ]
 }
 ```
+
+**Important**: Do NOT include an `"event"` field. The GitHub API rejects `"event": "PENDING"` as an invalid value. Omitting the field creates a pending review by default.
 
 Then create the review:
 ```
