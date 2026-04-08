@@ -166,14 +166,18 @@ Create a single pending review containing all approved inline comments in one AP
 
 **Important**: Do NOT include an `"event"` field. The GitHub API rejects `"event": "PENDING"` as an invalid value. Omitting the field creates a pending review by default.
 
-Then create the review:
+Then create the review (capture response to a file, keep stderr separate so warnings on stderr can't corrupt JSON parsing):
 ```
-gh api repos/<owner>/<repo>/pulls/<number>/reviews --method POST --input <json_file>
+gh api repos/<owner>/<repo>/pulls/<number>/reviews --method POST --input <json_file> \
+  2>/tmp/gh_stderr > /tmp/gh_response.json
+# Check $? == 0, then parse /tmp/gh_response.json.
 ```
 
 **Line numbers**: `line` is the line number in the **new version** of the file (for added or context lines). For comments spanning multiple lines, add `start_line` for the first line and `line` for the last line. Use `side: "RIGHT"` (new file, default) or `side: "LEFT"` (deleted lines).
 
 **General comments** (not tied to a specific line): include them in the review `body` field rather than in the `comments` array.
+
+**Retry safety**: Unlike GitLab's `draft_notes` (one API call per draft), the GitHub pending-review API creates the whole review in a single call, so partial failure is less likely — but the "never `2>&1` into a JSON parser" rule still applies. If the POST did succeed on the server but your parse failed, list current reviews with `gh api repos/<owner>/<repo>/pulls/<number>/reviews` before retrying to avoid creating a second pending review.
 
 ### GitLab: Creating Draft Notes
 
@@ -194,16 +198,31 @@ Use the latest version's `base_commit_sha`, `start_commit_sha`, and `head_commit
 
 IMPORTANT: For ALL draft comments (both general and inline), you MUST write a JSON file and use `--input` with `-H "Content-Type: application/json"`. The `-f` flag does NOT support nested fields like `position` and will silently produce broken comments.
 
+**Robust POST pattern — always follow this, or you will create duplicate drafts.**
+
+Creating a draft note is NOT idempotent. If the POST succeeds but your downstream parsing/inspection of the response fails, a naive retry will create a DUPLICATE draft. Two rules prevent this:
+
+1. **Never pipe `glab api` directly into a JSON parser, and never use `2>&1` when capturing its output.** glab writes non-fatal warnings to stderr (SSH `known_hosts` updates, `~/.config/glab-cli/config.yml` write failures under sandboxes, etc.). Mixed into stdout, those warnings silently break JSON parsing *after* the POST has already succeeded on the server. Always redirect stdout to a file and stderr somewhere separate (`2>/dev/null` or `2>/tmp/glab_stderr`), then parse the file. This way `glab api`'s exit code is the sole source of truth for whether the POST landed.
+
+2. **Before retrying any `draft_notes` POST, list existing drafts.** If a draft with the same `new_path` + `new_line` + opening line of `note` (or the same `note` text for general drafts) already exists, the previous POST succeeded — skip the retry.
+   ```
+   glab api "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" 2>/dev/null > /tmp/drafts.json
+   ```
+
+**Create drafts sequentially, not in parallel.** Parallel creation amplifies the partial-failure problem (some succeed, some don't, retry logic has to dedupe across all of them). For a small number of drafts the serialization cost is negligible.
+
 - For **general draft comments** (not tied to a specific line), write a JSON file:
   ```json
   {
     "note": "<comment text>"
   }
   ```
-  Then create the draft:
+  Then create the draft (capture response to a file, keep stderr separate):
   ```
   glab api --method POST "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" \
-    --input <json_file> -H "Content-Type: application/json"
+    --input <json_file> -H "Content-Type: application/json" \
+    2>/tmp/glab_stderr > /tmp/glab_response.json
+  # Check $? == 0, then parse /tmp/glab_response.json to extract the new note id.
   ```
 
 - For **inline draft comments** (tied to a specific file and line in the diff), write a JSON file:
@@ -220,15 +239,15 @@ IMPORTANT: For ALL draft comments (both general and inline), you MUST write a JS
     }
   }
   ```
-  Then create the draft:
+  Then create the draft (same redirect-to-file pattern as above):
   ```
   glab api --method POST "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" \
-    --input <json_file> -H "Content-Type: application/json"
+    --input <json_file> -H "Content-Type: application/json" \
+    2>/tmp/glab_stderr > /tmp/glab_response.json
+  # Check $? == 0, then parse /tmp/glab_response.json to extract the new note id.
   ```
 
 **Line number**: `new_line` must be a line number that appears in the **new side** of the diff (a context line or an added `+` line). Use `old_line` instead for removed `-` lines. The line number must correspond to a line visible in the diff, otherwise GitLab will reject the position.
-
-**Tip**: Write multiple JSON files in parallel, then create the drafts in parallel for efficiency.
 
 ### Draft Comment Adjustments (on user request)
 
@@ -278,6 +297,7 @@ You may ONLY use `gh` and `glab` for the operations listed in this skill. Any ot
 - **No `--jq` flag**: glab does not support `--jq`. Pipe output through `jq` instead.
 - **No `--hostname` flag for `glab api`**: glab resolves the GitLab host from its config file (`~/.config/glab-cli/config.yml`). Do NOT pass `--hostname` to `glab api`.
 - **Nested JSON fields**: The `-f` flag creates flat key-value string parameters. It does NOT support nested field syntax like `-f "position[base_sha]=..."`. For nested JSON, you MUST use `--input` with a JSON file and `-H "Content-Type: application/json"`.
+- **Never merge stderr into stdout when parsing output**: glab writes non-fatal warnings to stderr (SSH `known_hosts` updates, config-file write failures under sandboxed filesystems, etc.). Using `2>&1` will leak these into any JSON parser reading from stdout and produce misleading `json.decoder.JSONDecodeError: Extra data` failures *after* the API call has already succeeded on the server. Always capture stdout to a file (`> /tmp/resp.json`) and send stderr elsewhere (`2>/dev/null` or `2>/tmp/stderr`).
 - Always URL-encode the project path when using `glab api` (replace `/` with `%2F`).
 
 ## General Notes
