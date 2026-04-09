@@ -190,6 +190,7 @@ Create a single pending review containing all approved inline comments in one AP
     {
       "path": "<file path>",
       "line": <line number in the new version of the file>,
+      "side": "RIGHT",
       "body": "**[severity]** <comment text>"
     }
   ]
@@ -206,10 +207,12 @@ gh api repos/<owner>/<repo>/pulls/<number>/reviews \
 
 **Critical: do NOT include an `event` field in the JSON.** The GitHub API rejects `"event": "PENDING"` as invalid, and any other value (`APPROVE`, `COMMENT`, `REQUEST_CHANGES`) immediately *publishes* the review. Omitting the field is the only way to create a pending (draft) review via the API.
 
-- `line` is the line number in the **new** version of the file (context lines or added `+` lines). For deleted-line comments, add `"side": "LEFT"`. For multi-line comments, use `start_line` for the first line and `line` for the last.
+- `line` is the line number in the **new** version of the file (context lines or added `+` lines). Always pass `side: "RIGHT"` explicitly for new-version lines — it's the default if omitted, but being explicit removes any ambiguity for readers comparing POST bodies. For deleted-line comments, set `side: "LEFT"` instead. For multi-line comments, use `start_line` for the first line and `line` for the last.
 - For general (not-line-specific) comments, put them in the top-level `body` rather than in the `comments` array.
 - Individual comments in a pending review can't be edited via API after creation. If the user wants to change something, delete the whole pending review (`gh api repos/<owner>/<repo>/pulls/<number>/reviews/<id> --method DELETE`) and recreate.
-- If the POST fails but you suspect it landed server-side (e.g. the response parse threw but the HTTP status was 2xx), list existing reviews (`gh api repos/<owner>/<repo>/pulls/<number>/reviews`) before retrying to avoid creating a duplicate pending review.
+- **Verify success via exit code + response `id` + `state: "PENDING"`, not via `line` / `side`.** For a freshly-created pending review, GitHub returns `line`, `side`, `start_line`, `start_side`, and `original_line` as `null` in the response — these only get populated after the review is submitted. The reliable success signals are: `gh api` exit code 0, a numeric `id` in the response, and `state: "PENDING"`. Don't treat the null position fields as an error. (This is analogous to the null-field behavior GitLab's `draft_notes` POST exhibits — see the GitLab section below.)
+- **The response's `position` field is the 1-indexed diff-hunk offset, not the new-file line number.** For files *added* by the PR (where every new-version line is a `+` line), diff position and new-file line coincide — `position: 45` means line 45. For files *modified* by the PR, they don't — `position` counts context and deleted lines too, so a comment POSTed with `line: 100, side: "RIGHT"` may read back as `position: 67` or similar. GitHub stores the anchor correctly as long as the POST passed `line` + `side`; the asymmetric interpretation only affects how the response reads back. (Tested end-to-end so far only on a PR adding a brand-new file — modified-file behavior is unverified.)
+- **Retry safety** (atomicity): unlike GitLab's per-comment `draft_notes` POSTs, the GitHub pending-review API creates the whole review in a single atomic call — either the entire review lands on the server or none of it does, so there's no partial-failure case to recover from mid-sequence. A simple retry is safe in most situations. But if the POST failed in a way where the outcome is ambiguous (network timeout mid-request, HTTP 5xx from the server, response body parse threw), list existing reviews (`gh api repos/<owner>/<repo>/pulls/<number>/reviews`) before retrying to avoid creating a second pending review.
 
 ### GitLab: draft notes
 
