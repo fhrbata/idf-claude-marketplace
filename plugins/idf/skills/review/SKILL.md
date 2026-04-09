@@ -1,307 +1,281 @@
 ---
-description: Review code changes — local branch changes (no args) or a GitHub PR / GitLab MR (pass URL). Offers to post draft review comments for MRs/PRs.
+description: Thorough code review — committed changes on the current branch (no args) or a GitHub PR / GitLab MR (pass URL). Fetches base and head SHAs locally so the review has full file context, presents findings for discussion, then offers to post them as a draft pending review (GitHub) or draft notes (GitLab) with inline comments.
 invoke: user
 ---
 
-Review code changes. Without arguments, reviews all local changes on the current branch (working tree + staged + unpushed commits vs upstream). With a GitHub PR or GitLab MR URL, fetches and reviews that MR/PR, then offers to post draft review comments.
+# Review
+
+Review committed code changes thoroughly. The review always runs locally against a `BASE_SHA..HEAD_SHA` range using `git`, so you have the full contents of every changed file — and any related untouched files — not just the diff hunks. In Remote Mode (a GitHub PR or GitLab MR URL) the skill also fetches existing discussion threads so the output can surface unresolved reviewer asks.
 
 **Arguments**: $ARGUMENTS
 
-## Mode Selection
+## Dispatch
 
-- If `$ARGUMENTS` is empty, use **Local Mode**.
-- If `$ARGUMENTS` contains a GitHub or GitLab URL, use **MR/PR Mode**.
-- Otherwise, inform the user and stop.
+- Empty `$ARGUMENTS` → **Local Mode**.
+- URL whose path contains `/pull/<number>` → **Remote Mode (GitHub)**.
+- URL whose path contains `/merge_requests/<number>` → **Remote Mode (GitLab)**. Works the same on `gitlab.com` and self-hosted instances — the path marker is the only signal, host doesn't matter.
+- Anything else → tell the user the argument wasn't recognized and stop.
 
----
+## Local Mode setup
 
-## Local Mode
+Goal: resolve `BASE_SHA` (fork point with the default remote branch) and `HEAD_SHA` (current committed HEAD), then proceed to Review.
 
-### Gather Changes
+1. `HEAD_SHA = git rev-parse HEAD`.
+2. Resolve the default remote branch to a concrete ref name. Try `git symbolic-ref --short refs/remotes/origin/HEAD` first (gives `origin/main` or `origin/master` as a name, not the symbolic ref itself); fall back to `origin/main` and `origin/master` directly if the symbolic ref isn't set. Call the result `BASE_REF`. If none of these exist, ask the user for a base ref (branch, tag, or SHA).
+3. `BASE_SHA = git merge-base HEAD <BASE_REF>`.
+4. **Confirm the base with the user before reviewing.** Non-default branching models (GitFlow, stacked release branches) can make the auto-detected base wrong, and the review is silently garbage if it's rooted at the wrong fork point. Tell them:
+   > *"Reviewing against merge-base with `<BASE_REF>` (commit `<short SHA>`, N commits in range). If you intended a different base — e.g. a develop-style integration branch or a release branch — name it now; otherwise confirm to proceed."*
+   
+   If they name a different ref, recompute `BASE_SHA` with `git merge-base HEAD <new_ref>` and proceed.
+5. If `BASE_SHA == HEAD_SHA`, stop — there's nothing committed to review on this branch.
+6. **Warn about uncommitted changes.** If `git diff --quiet` or `git diff --staged --quiet` exits non-zero, tell the user the review will cover committed history only (`BASE_SHA..HEAD_SHA`) and confirm whether to continue. The review itself ignores the working tree and index; note the dirty state in the Overview so it's visible.
+7. Proceed to **Review**.
 
-1. **Determine the upstream baseline**:
-   - Run `git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null` to find the upstream tracking branch.
-   - If no upstream is set, fall back to the default branch: try `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'`, then `main`, then `master`.
-   - Let `BASE` = the resolved upstream/default branch ref.
+## Remote Mode setup
 
-2. **Gather all changes** (run in parallel where possible):
-   - `git diff` — unstaged working tree changes
-   - `git diff --staged` — staged changes
-   - `git log --oneline BASE..HEAD` — unpushed commits
-   - `git diff BASE..HEAD` — cumulative diff of unpushed commits
-   - `git diff --stat BASE..HEAD` — summary of unpushed commit changes
+Goal: resolve `BASE_SHA` and `HEAD_SHA` from the PR/MR, fetch both commits locally, fetch existing discussion threads, then proceed to Review.
 
-3. **Assess what needs reviewing**:
-   - If there are no changes at all (no working tree changes, no staged changes, no unpushed commits), inform the user and stop.
-   - Report what was found: N unpushed commits, staged changes in M files, unstaged changes in K files.
-
-4. Continue to **Review** below.
-
----
-
-## MR/PR Mode
-
-### Fetch MR/PR Data
-
-1. **Parse the URL** to determine the platform and extract identifiers:
-   - **GitHub**: URL matches `github.com/<owner>/<repo>/pull/<number>` — use `gh` CLI.
-   - **GitLab**: URL matches `gitlab.com/.../-/merge_requests/<number>` or a self-hosted GitLab instance — use `glab` CLI.
-   - If the URL does not match either pattern, inform the user and stop.
-   - If the CLI tool is not installed, inform the user which tool they need (`gh` or `glab`) and how to install it.
-
-2. **Fetch MR/PR metadata and diff**:
-   - For GitHub:
-     ```
-     gh pr view <number> --repo <owner>/<repo> --json title,body,baseRefName,headRefName,files,additions,deletions
-     ```
-     The diff from `gh pr diff` can be truncated for large changes. To get the full diff reliably, fetch the base and head SHAs and use git directly:
-     ```
-     gh api repos/<owner>/<repo>/pulls/<number> --jq '.base.sha, .head.sha'
-     git fetch origin <head_sha>
-     git diff <base_sha>..<head_sha> > /tmp/pr_diff.txt
-     ```
-     Then read the diff from the temp file. If the PR branch is not available locally, `git fetch origin <head_sha>` ensures it is fetched first.
-
-   - For GitLab:
-     ```
-     glab mr view <number> --repo <owner>/<repo>
-     glab mr diff <number> --repo <owner>/<repo>
-     ```
-
-3. Continue to **Review** below.
-
----
+1. **Pick the CLI**: `gh` for GitHub, `glab` for GitLab. If the relevant tool isn't installed, tell the user which to install and stop.
+2. **Sanity-check the origin remote.** Extract `<owner>/<repo>` (GitHub) or `<namespace>/<repo>` (GitLab) from *both* the PR/MR URL and `git remote get-url origin`, and compare case-insensitively. Extraction:
+   - PR/MR URL: take the path segment before `/pull/<number>` (GitHub) or `/-/merge_requests/<number>` (GitLab).
+   - Origin URL: strip the scheme/host prefix and any trailing `.git`. SSH (`git@host:owner/repo.git`) and HTTPS (`https://host/owner/repo`) forms never match as raw strings even when they point at the same repo, so you have to normalize first.
+   
+   If the tuples don't match, stop and tell the user to open the skill from a clone of the right repo — the rest of the flow needs the local git object store to contain the project's history.
+3. **Fetch PR/MR metadata** and extract the base and head SHAs. Capture stdout to a file and keep stderr separate so non-fatal warnings can't corrupt the JSON:
+   
+   **GitHub**:
+   ```
+   gh pr view <number> --repo <owner>/<repo> \
+     --json title,body,author,labels,baseRefName,headRefName,baseRefOid,headRefOid,additions,deletions,files \
+     2>/tmp/gh_stderr > /tmp/pr_meta.json
+   ```
+   Then `BASE_SHA = jq -r '.baseRefOid' /tmp/pr_meta.json` and `HEAD_SHA = jq -r '.headRefOid' /tmp/pr_meta.json`.
+   
+   **GitLab**:
+   ```
+   glab mr view <number> --repo <namespace>/<repo> --output json \
+     2>/tmp/glab_stderr > /tmp/mr_meta.json
+   ```
+   Then `BASE_SHA = jq -r '.diff_refs.base_sha' /tmp/mr_meta.json` and `HEAD_SHA = jq -r '.diff_refs.head_sha' /tmp/mr_meta.json`.
+4. **Fetch existing discussion threads** so the review can flag unresolved reviewer asks:
+   
+   **GitHub** — three endpoints:
+   ```
+   gh api repos/<owner>/<repo>/pulls/<number>/reviews   2>/tmp/gh_stderr > /tmp/reviews.json        # review bodies / verdicts
+   gh api repos/<owner>/<repo>/pulls/<number>/comments  2>/tmp/gh_stderr > /tmp/line_comments.json  # inline review comments
+   gh api repos/<owner>/<repo>/issues/<number>/comments 2>/tmp/gh_stderr > /tmp/pr_comments.json    # top-level PR comments
+   ```
+   
+   **GitLab** — first resolve the numeric project ID (on self-hosted GitLab the `projects/<url_encoded_path>` shortcut is unreliable and can return 404 or the wrong project):
+   ```
+   glab api "projects" --field search="<unqualified_repo_name>" 2>/tmp/glab_stderr > /tmp/projects.json
+   PROJECT_ID=$(jq -r '.[] | select(.path_with_namespace == "<namespace>/<repo>") | .id' /tmp/projects.json | head -n1)
+   ```
+   Validate that `PROJECT_ID` is a single numeric value. If not, stop and tell the user the project lookup failed. Then:
+   ```
+   glab api "projects/${PROJECT_ID}/merge_requests/<number>/discussions" \
+     2>/tmp/glab_stderr > /tmp/discussions.json
+   ```
+   Keep `PROJECT_ID` around — it's also needed later if the user asks to post draft comments.
+5. **Fetch both commits into the local object store**:
+   ```
+   git fetch origin <BASE_SHA> <HEAD_SHA>
+   ```
+6. **Recompute `BASE_SHA` as the real merge-base** of base and head:
+   ```
+   BASE_SHA=$(git merge-base <BASE_SHA> <HEAD_SHA>)
+   ```
+   Why: GitHub's `baseRefOid` is the current *tip* of the base branch, not the fork point of the PR. For a stale PR whose base has moved forward since the PR was opened, diffing against the base tip includes base-branch commits as apparent deletions — pure noise that drowns the real change. GitLab's `diff_refs.base_sha` is already the merge-base on well-behaved MRs, so this is a no-op for GitLab; done for symmetry and defense.
+7. Proceed to **Review**.
 
 ## Review
 
-### Review Methodology
+You now have `BASE_SHA` and `HEAD_SHA`, both commits are in the local object store, and — in Remote Mode — metadata and discussion threads are on disk.
 
-1. **Understand the purpose first** — Read description/commits before code. Understand what the author claims to have done and why.
-2. **Read all changed files in full** — Not just the diff. Understand surrounding context, function signatures, naming conventions, existing patterns. For very large diffs (more than 20 files changed), process in batches and prioritize the most impactful changes.
-3. **Verify description claims against code** — If description says "migrated X to Y", check every instance. If it claims "config Z is defined in component W", verify. Discrepancies between stated intent and actual code are high-value findings.
-4. **Check cross-file consistency** — When the same pattern appears in multiple changed files, systematically compare: naming, parameters, error handling, comments. Inconsistencies are common and impactful.
-5. **Compare parallel implementations** — If the change modifies multiple implementations of the same concept (e.g., v1 and v2, different backends), compare for behavioral parity. Document differences and verify they are intentional.
-6. **Trace edge cases** — For new/modified functions, consider all parameter values: empty lists, duplicate calls, invalid types, boundary values.
-7. **Check documentation accuracy** — Verify comments/docstrings match actual behavior. Check for imprecise wording, stale comments, claims that are technically incorrect.
+### Read the change with full context
 
-### Review Criteria
+- **Diff and stats** (redirect the diff to a file if large so it doesn't blow the Bash output buffer):
+  ```
+  git diff <BASE_SHA>..<HEAD_SHA> > /tmp/review_diff.patch
+  git diff --stat <BASE_SHA>..<HEAD_SHA>
+  git log --oneline <BASE_SHA>..<HEAD_SHA>
+  ```
+- **Read every changed file in full at the review head**, not just the diff hunks. This is the single biggest differentiator between a shallow review and a thorough one — cross-file inconsistencies, parity gaps, and migration drift are nearly impossible to catch from hunks alone:
+  ```
+  git show <HEAD_SHA>:<path>
+  ```
+  For files deleted in the range, read `git show <BASE_SHA>:<path>` instead (the path doesn't exist at HEAD). For renamed files (`R100 old new` in the diff), read both `<BASE_SHA>:<old>` and `<HEAD_SHA>:<new>`. Binary files can't be reviewed — note them in the Overview and skip.
+- **Read outward from the changed files** in three directions, each finding a different class of bug:
+  - **Siblings** — parallel copies of the same pattern elsewhere in the tree: v1/v2 implementations of the same feature, alternative backends behind a common interface, "we forked this once and now we have two copies that drift" situations, or naming drift between a legacy and a current prefix for the same subsystem. Siblings typically don't reference each other, so you can't follow a symbol to find them. Three mechanical discovery techniques, in increasing order of reliability:
+    1. `git ls-files '**/<filename>'` — other copies of the changed file's filename elsewhere in the tree.
+    2. `git grep -l '<shared naming prefix or suffix>'` — files whose exported symbols follow the same naming convention.
+    3. `git grep -l '<shared lower-level primitive>'` — everyone who wraps the same underlying call the changed code wraps. Catches what the first two miss.
+    
+    When only one sibling is touched, explicitly check parity with the others.
+  - **Callers** — consumers of the changed API. `git grep -l '<symbol>'` for direct textual callers, plus test files (which often exercise edge cases the production callers don't), plus any language-specific cross-reference tools available (ctags, `compile_commands.json` + clangd, LSP symbol search).
+  - **Helpers** — the changed code's own dependencies. Walk the imports / `#include` / `REQUIRES` / `use` / `import` at the top of each changed file. If a helper's behavior is part of the change's contract, read the helper at `<HEAD_SHA>` too — helper changes that land in the same PR are a common source of silent behavior shifts.
+- **Do not use `gh pr diff` or `glab mr diff`.** The local `git diff` is canonical: no truncation, no platform format quirks. The platform CLIs are only for metadata and discussions.
 
-- **Correctness** — Logic errors, edge cases, off-by-one, null handling, race conditions.
-- **Consistency** — Naming, behavior, API symmetry across files and implementations. Same concept should use same names. Parallel implementations should have equivalent behavior or documented differences.
-- **Migration correctness** — When replacing a lenient operation with a stricter one, verify existing arguments are actually valid. Don't assume correctness because the old code "worked."
-- **Error handling** — Missing error paths, swallowed errors, resource leaks, unclear error messages.
-- **Documentation accuracy** — Comments match behavior, precise wording, no stale comments.
-- **Security** — Hardcoded secrets, insecure defaults, improper input validation.
-- **Performance** — Unnecessary allocations, algorithmic complexity, blocking calls.
-- **Best practices** — Framework/language idioms, deprecated APIs, missing tests for new logic.
+### Methodology (in order)
 
-Additionally consider:
-- Whether the commits tell a coherent story
-- Whether uncommitted changes are consistent with the committed work (local mode)
-- Whether the scope is appropriate for a single MR/PR
-- Whether the changes are complete (no half-finished features, no leftover debug code)
-- **MR Quality** (MR/PR mode): commit message clarity, appropriate scope, test coverage for new code
+1. **Read the description and commit messages first.** Understand what the author claims to have done and why.
+2. **Read project conventions** if present: `README`, `CONTRIBUTING`, `CLAUDE.md`, `.claude/`, `.github/copilot-instructions.md`, `.cursor/rules/`, language/framework style guides in the repo. Don't mention the absence of any of these in the final report.
+3. **Read every changed file in full at `<HEAD_SHA>`.**
+4. **Read outward** — siblings, callers, helpers.
+5. **Verify description claims against the code.** Half-applied renames, "migrated all X" that missed a few, "removed Y" that left traces behind — this is the most common failure mode, and a high-value finding when caught.
+6. **Trace edge cases** for new or modified functions: empty input, duplicate calls, invalid types, boundary values, concurrent access.
+7. **Check documentation accuracy** — comments and docstrings should match actual behavior; no stale claims or imprecise wording.
 
-### Output Format
+### What to look for
 
-Start with an **Overview**:
-- **Local mode**: current branch → upstream branch, unpushed commits count, staged/unstaged file counts, brief summary
-- **MR/PR mode**: title and description summary, base ← head branch, files changed / lines added / lines removed
+- **Correctness** — logic errors, off-by-one, null/error handling, race conditions, resource leaks.
+- **Consistency** — naming, behavior, and API symmetry across files and parallel implementations. Same concept should have the same name; parallel implementations should have equivalent behavior or documented differences.
+- **Migration correctness** — when replacing a lenient operation with a stricter one, every previously valid input must still be valid.
+- **Error handling** — missing error paths, swallowed errors, unclear messages.
+- **Security** — hardcoded secrets, insecure defaults, missing input validation.
+- **Performance** — unnecessary allocations, algorithmic complexity, blocking calls in hot paths.
+- **Best practices** — framework/language idioms, deprecated APIs, missing tests for new logic.
+- **Commit story** — coherent commits, appropriate scope for a single change, clear messages, no leftover debug code or half-finished features.
+- **When the diff touches documentation**:
+  - Prefer consistency with the existing page over applying stricter new rules to the changed lines.
+  - Check that all examples in the same file are mutually consistent — migration guides and "before/after" sections commonly drift between an intermediate and a complete example.
+  - When a compile-time flag, Kconfig symbol, or config key is replaced with a runtime option, check whether the **default behavior** changed and whether the changelog or migration guide calls it out.
 
-Use the following severity levels:
-- `[critical]` — must fix before merge (bugs, security, data loss)
-- `[issue]` — should fix, likely a bug or significant problem
-- `[suggestion]` — improvement worth considering, not blocking
-- `[nitpick]` — style, wording, or minor preference, entirely optional
+### Present the findings
 
-Then for each issue found, present as a numbered list:
+Produce a single structured message. Then **stop and wait for the user to discuss** — don't post anything to GitHub/GitLab yet, no matter how confident you are in the findings.
 
+**Overview**
+- **Mode**: `Local` / `GitHub PR #<n>` / `GitLab MR !<n>` (include the URL in Remote Mode).
+- **Subject**: branch name (Local) or PR/MR title + author (Remote).
+- **Range**: `<base short>..<head short>`, commit count, files changed, lines added/removed, binary files skipped. For Remote Mode, also `base ← head` branches. For Local Mode, `merge-base with <BASE_REF>` so the user can verify the base was chosen correctly.
+- **Uncommitted work** (Local Mode only, only if the user opted to continue with a dirty tree): one line noting it's excluded from the review.
+
+**Unresolved discussions** (Remote Mode only, *only if any exist*) — bullet list of reviewer asks from prior discussion threads that weren't addressed by later commits or a reply from the author. Quote each unresolved item verbatim (one short line) and note who asked. If all prior discussion is resolved, omit the section entirely — don't write "no unresolved discussions."
+
+**Breaking changes** (*only if any exist*) — removed or renamed public APIs, changed behavior under existing flags, schema/config changes, dropped support matrices. Omit the section entirely if none.
+
+**Findings** — numbered list. For each finding:
 ```
-### 1. [severity] file:line
+### N. [severity] file:line
 **Category**: ...
-**Description**: What the problem is and why it matters
-**Suggestion**: How to fix it (with a code snippet when helpful)
+**Description**: What the problem is and why it matters.
+**Suggestion**: How to fix it (with a code snippet when helpful).
 ```
 
-End with a **Summary** section listing:
-- Total issues by severity
-- Overall assessment (ready to submit / needs minor fixes / needs significant work)
-- Top 3 most important items to address
+Severity tags:
+- `[critical]` — must fix (bugs, security, data loss)
+- `[issue]` — should fix (likely a bug or significant problem)
+- `[suggestion]` — worth considering, not blocking
+- `[nitpick]` — style, wording, or minor preference, optional
 
----
+When referencing other code locations in a finding's Description or Suggestion body, use the same `file:line` (or `file:start-end`) format followed by a short quoted snippet of the actual lines, so the reader can identify the location without opening the file. Don't use `§N` or section-number shorthand.
 
-## Draft Review Comments (MR/PR mode only)
+**Summary** — total findings by severity, overall assessment (ready to submit / needs minor fixes / needs significant work), and the top items to address first.
 
-After presenting findings, offer to post them as draft review comments:
-- Ask: "Would you like me to post these as draft review comments on the MR/PR?"
-- If the user declines, stop.
+## Discussion, then posting (Remote Mode only)
 
-**Let the user select comments to post**. They can:
-- **Approve all**: "yes", "approve", or "go ahead"
-- **Approve specific ones**: "approve 1, 3, 5"
-- **Edit a comment**: "edit 2: change the message to ..."
-- **Remove a comment**: "remove 4"
-- **Reject all**: "reject" or "cancel"
+After the user reads the findings they may:
+- Ask questions, challenge specific findings, or supply context you didn't have.
+- Ask you to re-read particular files, check additional callers, or go deeper into a specific area.
+- Approve a subset for posting and drop the rest.
+- Edit the wording of individual comments before they go up.
 
-Wait for the user's response before proceeding.
+**Do not post anything until the user explicitly tells you to.** When they do, confirm which findings to include (if they haven't specified) and then post them as a **draft** — never as a published review. The user submits the draft themselves from the PR/MR page after a final read-through.
 
-**Create the draft comments** using the platform-specific instructions below, then report results. Remind the user to review the drafts on the MR/PR page and submit the review themselves.
+### GitHub: pending review
 
-### GitHub: Creating a Pending Review
-
-Create a single pending review containing all approved inline comments in one API call. Write a JSON file:
+Create a single pending review containing all approved inline comments in one API call. Write the JSON body to a file:
 
 ```json
 {
-  "body": "",
+  "body": "<optional top-level summary>",
   "comments": [
     {
-      "path": "<file_path>",
-      "line": <line_number>,
-      "body": "<comment text>"
+      "path": "<file path>",
+      "line": <line number in the new version of the file>,
+      "body": "**[severity]** <comment text>"
     }
   ]
 }
 ```
 
-**Important**: Do NOT include an `"event"` field. The GitHub API rejects `"event": "PENDING"` as an invalid value. Omitting the field creates a pending review by default.
+Then POST it:
 
-Then create the review (capture response to a file, keep stderr separate so warnings on stderr can't corrupt JSON parsing):
 ```
-gh api repos/<owner>/<repo>/pulls/<number>/reviews --method POST --input <json_file> \
+gh api repos/<owner>/<repo>/pulls/<number>/reviews \
+  --method POST --input /tmp/review.json \
   2>/tmp/gh_stderr > /tmp/gh_response.json
-# Check $? == 0, then parse /tmp/gh_response.json.
 ```
 
-**Line numbers**: `line` is the line number in the **new version** of the file (for added or context lines). For comments spanning multiple lines, add `start_line` for the first line and `line` for the last line. Use `side: "RIGHT"` (new file, default) or `side: "LEFT"` (deleted lines).
+**Critical: do NOT include an `event` field in the JSON.** The GitHub API rejects `"event": "PENDING"` as invalid, and any other value (`APPROVE`, `COMMENT`, `REQUEST_CHANGES`) immediately *publishes* the review. Omitting the field is the only way to create a pending (draft) review via the API.
 
-**General comments** (not tied to a specific line): include them in the review `body` field rather than in the `comments` array.
+- `line` is the line number in the **new** version of the file (context lines or added `+` lines). For deleted-line comments, add `"side": "LEFT"`. For multi-line comments, use `start_line` for the first line and `line` for the last.
+- For general (not-line-specific) comments, put them in the top-level `body` rather than in the `comments` array.
+- Individual comments in a pending review can't be edited via API after creation. If the user wants to change something, delete the whole pending review (`gh api repos/<owner>/<repo>/pulls/<number>/reviews/<id> --method DELETE`) and recreate.
+- If the POST fails but you suspect it landed server-side (e.g. the response parse threw but the HTTP status was 2xx), list existing reviews (`gh api repos/<owner>/<repo>/pulls/<number>/reviews`) before retrying to avoid creating a duplicate pending review.
 
-**Retry safety**: Unlike GitLab's `draft_notes` (one API call per draft), the GitHub pending-review API creates the whole review in a single call, so partial failure is less likely — but the "never `2>&1` into a JSON parser" rule still applies. If the POST did succeed on the server but your parse failed, list current reviews with `gh api repos/<owner>/<repo>/pulls/<number>/reviews` before retrying to avoid creating a second pending review.
+### GitLab: draft notes
 
-### GitLab: Creating Draft Notes
+Each inline comment is a separate `POST .../draft_notes`. Before posting anything, fetch the MR's version SHAs — these anchor the comments to a specific diff version and are **distinct** from the review-range `BASE_SHA`/`HEAD_SHA`; don't reassign the review-range variables here:
 
-**Resolve the project ID** (needed for API calls):
-- URL-encode the project path (replace `/` with `%2F`).
-- Fetch the numeric ID:
-  ```
-  glab api "projects/<url_encoded_path>" | jq -r '.id'
-  ```
-
-**Fetch MR version SHAs** (needed for inline draft comments):
 ```
-glab api "projects/<project_id>/merge_requests/<mr_iid>/versions" | jq '.[0]'
+glab api "projects/${PROJECT_ID}/merge_requests/<number>/versions" \
+  2>/tmp/glab_stderr > /tmp/versions.json
 ```
-Use the latest version's `base_commit_sha`, `start_commit_sha`, and `head_commit_sha`.
 
-**Create draft comments** on the MR:
+The position SHAs for inline draft notes are `.[0].base_commit_sha`, `.[0].start_commit_sha`, and `.[0].head_commit_sha` from the versions file (latest version first). For each inline comment, write a JSON file:
 
-IMPORTANT: For ALL draft comments (both general and inline), you MUST write a JSON file and use `--input` with `-H "Content-Type: application/json"`. The `-f` flag does NOT support nested fields like `position` and will silently produce broken comments.
-
-**Robust POST pattern — always follow this, or you will create duplicate drafts.**
-
-Creating a draft note is NOT idempotent. If the POST succeeds but your downstream parsing/inspection of the response fails, a naive retry will create a DUPLICATE draft. Two rules prevent this:
-
-1. **Never pipe `glab api` directly into a JSON parser, and never use `2>&1` when capturing its output.** glab writes non-fatal warnings to stderr (SSH `known_hosts` updates, `~/.config/glab-cli/config.yml` write failures under sandboxes, etc.). Mixed into stdout, those warnings silently break JSON parsing *after* the POST has already succeeded on the server. Always redirect stdout to a file and stderr somewhere separate (`2>/dev/null` or `2>/tmp/glab_stderr`), then parse the file. This way `glab api`'s exit code is the sole source of truth for whether the POST landed.
-
-2. **Before retrying any `draft_notes` POST, list existing drafts.** If a draft with the same `new_path` + `new_line` + opening line of `note` (or the same `note` text for general drafts) already exists, the previous POST succeeded — skip the retry.
-   ```
-   glab api "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" 2>/dev/null > /tmp/drafts.json
-   ```
-
-**Create drafts sequentially, not in parallel.** Parallel creation amplifies the partial-failure problem (some succeed, some don't, retry logic has to dedupe across all of them). For a small number of drafts the serialization cost is negligible.
-
-- For **general draft comments** (not tied to a specific line), write a JSON file:
-  ```json
-  {
-    "note": "<comment text>"
+```json
+{
+  "note": "**[severity]** <comment text>",
+  "position": {
+    "base_sha":  "<versions[0].base_commit_sha>",
+    "start_sha": "<versions[0].start_commit_sha>",
+    "head_sha":  "<versions[0].head_commit_sha>",
+    "position_type": "text",
+    "new_path": "<file path>",
+    "new_line": <line number in the new version of the file>
   }
-  ```
-  Then create the draft (capture response to a file, keep stderr separate):
-  ```
-  glab api --method POST "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" \
-    --input <json_file> -H "Content-Type: application/json" \
-    2>/tmp/glab_stderr > /tmp/glab_response.json
-  # Check $? == 0, then parse /tmp/glab_response.json to extract the new note id.
-  ```
+}
+```
 
-- For **inline draft comments** (tied to a specific file and line in the diff), write a JSON file:
-  ```json
-  {
-    "note": "<comment text>",
-    "position": {
-      "base_sha": "<base_commit_sha>",
-      "start_sha": "<start_commit_sha>",
-      "head_sha": "<head_commit_sha>",
-      "position_type": "text",
-      "new_path": "<file_path>",
-      "new_line": <line_number_integer>
-    }
-  }
-  ```
-  Then create the draft (same redirect-to-file pattern as above):
-  ```
-  glab api --method POST "projects/<project_id>/merge_requests/<mr_iid>/draft_notes" \
-    --input <json_file> -H "Content-Type: application/json" \
-    2>/tmp/glab_stderr > /tmp/glab_response.json
-  # Check $? == 0, then parse /tmp/glab_response.json to extract the new note id.
-  ```
+Then POST it:
 
-**Line number**: `new_line` must be a line number that appears in the **new side** of the diff (a context line or an added `+` line). Use `old_line` instead for removed `-` lines. The line number must correspond to a line visible in the diff, otherwise GitLab will reject the position.
+```
+glab api --method POST "projects/${PROJECT_ID}/merge_requests/<number>/draft_notes" \
+  --input /tmp/note.json -H "Content-Type: application/json" \
+  2>/tmp/glab_stderr > /tmp/glab_response.json
+```
 
-### Draft Comment Adjustments (on user request)
+For general (not-line-specific) draft notes, omit the `position` object — just `{"note": "..."}`.
 
-If the user asks to update or remove draft comments after they've been created:
+**Critical `glab` gotchas you will hit if you don't know about them**:
 
-**GitHub**:
-- **Delete a pending review**:
-  ```
-  gh api repos/<owner>/<repo>/pulls/<number>/reviews/<review_id> --method DELETE
-  ```
-  Note: Individual comments within a pending review cannot be edited via API. Delete the review and recreate it.
+- **Always use `--input` with a JSON file for nested fields.** The `-f` flag creates flat string parameters and silently drops nested fields like `position[base_sha]`. If you use `-f` for a draft note with a position, the POST succeeds but the `position` is empty and the draft is broken.
+- **Never pipe `glab api` into a JSON parser via `2>&1`.** glab writes non-fatal warnings to stderr (SSH `known_hosts` updates, config-file write failures under sandboxed filesystems). Mixed into stdout, they silently break JSON parsing *after* the POST has already succeeded on the server. Always redirect stdout to a file and stderr elsewhere (`2>/dev/null` or `2>/tmp/glab_stderr`); the exit code is the only reliable signal of whether the POST landed.
+- **`draft_notes` POST is not idempotent.** If the response parse fails but the POST succeeded server-side, a naive retry creates a duplicate. Before retrying, list existing drafts (`glab api "projects/${PROJECT_ID}/merge_requests/<number>/draft_notes"`) and skip any that already match the new draft's `new_path` + `new_line` + opening line of `note`.
+- **Create drafts sequentially**, not in parallel. Parallel creation amplifies the partial-failure problem and makes deduplication harder.
+- **No `--jq` flag on glab** — pipe to `jq` instead. **No `--hostname` for `glab api`** — the host comes from `~/.config/glab-cli/config.yml`.
 
-**GitLab**:
-- **Update a draft**:
-  ```
-  glab api --method PUT "projects/<project_id>/merge_requests/<mr_iid>/draft_notes/<note_id>" \
-    -f note="<updated_comment>"
-  ```
-- **Delete a draft**:
-  ```
-  glab api --method DELETE "projects/<project_id>/merge_requests/<mr_iid>/draft_notes/<note_id>"
-  ```
-- **List current drafts** (to find note IDs):
-  ```
-  glab api "projects/<project_id>/merge_requests/<mr_iid>/draft_notes"
-  ```
+**Line numbers**: `new_line` must be a line visible on the **new** side of the diff (a context line or a `+` added line). For comments on deleted lines, use `old_line` instead. The line must actually appear in the diff — GitLab rejects positions that point at lines outside the diff hunks.
 
----
+**Adjusting drafts after posting**:
+- Update a draft: `glab api --method PUT "projects/${PROJECT_ID}/merge_requests/<number>/draft_notes/<id>" -f note="<updated text>"` (`-f` works here because `note` is a flat field, not nested).
+- Delete a draft: `glab api --method DELETE "projects/${PROJECT_ID}/merge_requests/<number>/draft_notes/<id>"`.
+- List current drafts: `glab api "projects/${PROJECT_ID}/merge_requests/<number>/draft_notes"`.
 
-## Allowed CLI Usage
+### After posting
 
-You may ONLY use `gh` and `glab` for the operations listed in this skill. Any other usage is strictly forbidden.
+Report how many drafts were posted and on which files. Remind the user the review is still a **draft** — they need to submit it from the PR/MR page for the reviewers (and author) to see it.
 
-**Read operations**:
-- `gh pr view`, `gh pr diff` — fetch PR data
-- `gh api repos/<owner>/<repo>/pulls/<number>/reviews` — list reviews
-- `glab mr view`, `glab mr diff` — fetch MR data
-- `glab api "projects/<id>/merge_requests/<iid>/versions"` — fetch MR versions
-- `glab api "projects/<id>/merge_requests/<iid>/draft_notes"` — list draft notes
-- `glab api "projects/<url_encoded_path>"` — resolve project ID
+## What `gh` and `glab` must never be used for
 
-**NEVER use gh/glab for**: merge, close, reopen, approve, revoke, publish, bulk_publish, or any operation outside of draft comment management.
+`gh` and `glab` are read-only for this skill with one exception: the draft-posting flow above. Never use them for:
 
-## CLI Notes
+- `merge`, `close`, `reopen`, `approve`, `revoke`, `publish`, `bulk_publish`
+- `gh pr review --approve` / `--request-changes`, `gh pr merge`, `gh pr ready`
+- `glab mr approve`, `glab mr merge`
+- any other `gh api` / `glab api` write (`--method POST`/`PUT`/`DELETE`) outside the draft/pending flows above
 
-### glab
-- **No `--jq` flag**: glab does not support `--jq`. Pipe output through `jq` instead.
-- **No `--hostname` flag for `glab api`**: glab resolves the GitLab host from its config file (`~/.config/glab-cli/config.yml`). Do NOT pass `--hostname` to `glab api`.
-- **Nested JSON fields**: The `-f` flag creates flat key-value string parameters. It does NOT support nested field syntax like `-f "position[base_sha]=..."`. For nested JSON, you MUST use `--input` with a JSON file and `-H "Content-Type: application/json"`.
-- **Never merge stderr into stdout when parsing output**: glab writes non-fatal warnings to stderr (SSH `known_hosts` updates, config-file write failures under sandboxed filesystems, etc.). Using `2>&1` will leak these into any JSON parser reading from stdout and produce misleading `json.decoder.JSONDecodeError: Extra data` failures *after* the API call has already succeeded on the server. Always capture stdout to a file (`> /tmp/resp.json`) and send stderr elsewhere (`2>/dev/null` or `2>/tmp/stderr`).
-- Always URL-encode the project path when using `glab api` (replace `/` with `%2F`).
-
-## General Notes
-
-- Draft comments / pending reviews are only visible to you until you submit the review on the MR/PR page.
-- Prefix each comment with a severity tag like `**[suggestion]**` or `**[critical]**` so the author can prioritize.
-- For large MRs, focus on the most impactful issues. Aim for quality over quantity.
+For diffs, file contents, commit history, and anything else about the code itself, use local `git` only.
