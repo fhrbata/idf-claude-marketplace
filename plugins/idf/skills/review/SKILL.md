@@ -36,12 +36,7 @@ Goal: resolve `BASE_SHA` (fork point with the default remote branch) and `HEAD_S
 Goal: resolve `BASE_SHA` and `HEAD_SHA` from the PR/MR, fetch both commits locally, fetch existing discussion threads, then proceed to Review.
 
 1. **Pick the CLI**: `gh` for GitHub, `glab` for GitLab. If the relevant tool isn't installed, tell the user which to install and stop.
-2. **Sanity-check the origin remote.** Extract `<owner>/<repo>` (GitHub) or `<namespace>/<repo>` (GitLab) from *both* the PR/MR URL and `git remote get-url origin`, and compare case-insensitively. Extraction:
-   - PR/MR URL: take the path segment before `/pull/<number>` (GitHub) or `/-/merge_requests/<number>` (GitLab).
-   - Origin URL: strip the scheme/host prefix and any trailing `.git`. SSH (`git@host:owner/repo.git`) and HTTPS (`https://host/owner/repo`) forms never match as raw strings even when they point at the same repo, so you have to normalize first.
-   
-   If the tuples don't match, stop and tell the user to open the skill from a clone of the right repo — the rest of the flow needs the local git object store to contain the project's history.
-3. **Fetch PR/MR metadata** and extract the base and head SHAs. Capture stdout to a file and keep stderr separate so non-fatal warnings can't corrupt the JSON:
+2. **Fetch PR/MR metadata** and extract the base and head SHAs. Capture stdout to a file and keep stderr separate so non-fatal warnings can't corrupt the JSON:
    
    **GitHub**:
    ```
@@ -57,7 +52,7 @@ Goal: resolve `BASE_SHA` and `HEAD_SHA` from the PR/MR, fetch both commits local
      2>/tmp/glab_stderr > /tmp/mr_meta.json
    ```
    Then `BASE_SHA = jq -r '.diff_refs.base_sha' /tmp/mr_meta.json` and `HEAD_SHA = jq -r '.diff_refs.head_sha' /tmp/mr_meta.json`.
-4. **Fetch existing discussion threads** so the review can flag unresolved reviewer asks:
+3. **Fetch existing discussion threads** so the review can flag unresolved reviewer asks:
    
    **GitHub** — three endpoints:
    ```
@@ -77,16 +72,19 @@ Goal: resolve `BASE_SHA` and `HEAD_SHA` from the PR/MR, fetch both commits local
      2>/tmp/glab_stderr > /tmp/discussions.json
    ```
    Keep `PROJECT_ID` around — it's also needed later if the user asks to post draft comments.
-5. **Fetch both commits into the local object store**:
+4. **Fetch both commits into the local object store.** This step is also the "does my clone belong to this project?" check — if the fetch succeeds, the clone has everything the review needs; if it fails, it doesn't:
    ```
    git fetch origin <BASE_SHA> <HEAD_SHA>
    ```
-6. **Recompute `BASE_SHA` as the real merge-base** of base and head:
+   If this fails, the origin remote doesn't contain this PR/MR's history — tell the user their clone is of an unrelated repo and stop.
+   
+   **This deliberately does not check that the origin URL textually matches the PR/MR URL.** Mirrored setups (a project hosted canonically on one platform with a mirror on the other, multi-remote workflows, forks used as origin) all work as long as the commit SHAs exist on the origin remote, which is what the fetch actually verifies. Fork-based PRs on GitHub and GitLab also work without a fallback: both platforms advertise PR/MR heads via `refs/pull/<N>/head` / `refs/merge-requests/<N>/head` and enable reachable-SHA fetching, so the direct `git fetch origin <SHA>` resolves even when the SHA isn't on any branch.
+5. **Recompute `BASE_SHA` as the real merge-base** of base and head:
    ```
    BASE_SHA=$(git merge-base <BASE_SHA> <HEAD_SHA>)
    ```
    Why: GitHub's `baseRefOid` is the current *tip* of the base branch, not the fork point of the PR. For a stale PR whose base has moved forward since the PR was opened, diffing against the base tip includes base-branch commits as apparent deletions — pure noise that drowns the real change. GitLab's `diff_refs.base_sha` is already the merge-base on well-behaved MRs, so this is a no-op for GitLab; done for symmetry and defense.
-7. Proceed to **Review**.
+6. Proceed to **Review**.
 
 ## Review
 
