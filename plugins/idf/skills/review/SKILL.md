@@ -51,7 +51,10 @@ Goal: resolve `BASE_SHA` and `HEAD_SHA` from the PR/MR, fetch both commits local
    glab mr view <number> --repo <namespace>/<repo> --output json \
      2>/tmp/glab_stderr > /tmp/mr_meta.json
    ```
-   Then `BASE_SHA = jq -r '.diff_refs.base_sha' /tmp/mr_meta.json` and `HEAD_SHA = jq -r '.diff_refs.head_sha' /tmp/mr_meta.json`.
+   Then:
+   - `BASE_SHA = jq -r '.diff_refs.base_sha' /tmp/mr_meta.json`
+   - `HEAD_SHA = jq -r '.diff_refs.head_sha' /tmp/mr_meta.json`
+   - `PROJECT_ID = jq -r '.project_id' /tmp/mr_meta.json` — the numeric ID of the project the MR belongs to (the *target* project, which is also where discussions and draft notes live). For cross-fork MRs this is the upstream's project ID, not the source fork's — exactly what's needed for the rest of the flow. `project_id` is a standard top-level field in GitLab's MR API response, always present. No separate search / URL-encoded-path lookup needed.
 3. **Fetch existing discussion threads** so the review can flag unresolved reviewer asks:
    
    **GitHub** — three endpoints:
@@ -61,22 +64,17 @@ Goal: resolve `BASE_SHA` and `HEAD_SHA` from the PR/MR, fetch both commits local
    gh api repos/<owner>/<repo>/issues/<number>/comments 2>/tmp/gh_stderr > /tmp/pr_comments.json    # top-level PR comments
    ```
    
-   **GitLab** — first resolve the numeric project ID (on self-hosted GitLab the `projects/<url_encoded_path>` shortcut is unreliable and can return 404 or the wrong project):
-   ```
-   glab api "projects" --field search="<unqualified_repo_name>" 2>/tmp/glab_stderr > /tmp/projects.json
-   PROJECT_ID=$(jq -r '.[] | select(.path_with_namespace == "<namespace>/<repo>") | .id' /tmp/projects.json | head -n1)
-   ```
-   Validate that `PROJECT_ID` is a single numeric value. If not, stop and tell the user the project lookup failed. Then:
+   **GitLab** — use the `PROJECT_ID` already extracted from the MR metadata in step 2. Discussions live on the target project, which is exactly what `.project_id` in the MR JSON points to (including for cross-fork MRs, where it's the upstream's ID, not the source fork's).
    ```
    glab api "projects/${PROJECT_ID}/merge_requests/<number>/discussions" \
      2>/tmp/glab_stderr > /tmp/discussions.json
    ```
-   Keep `PROJECT_ID` around — it's also needed later if the user asks to post draft comments.
-4. **Fetch both commits into the local object store.** This step is also the "does my clone belong to this project?" check — if the fetch succeeds, the clone has everything the review needs; if it fails, it doesn't:
+   Keep `PROJECT_ID` in scope — it's also needed later if the user asks to post draft comments. If shell state has been discarded by then (e.g. between Bash tool calls), re-read it cheaply with `jq -r '.project_id' /tmp/mr_meta.json` — no extra API call.
+4. **Fetch both commits into the local object store.** This step is also the "does my current working directory belong to this project?" check — if the fetch succeeds, the clone has everything the review needs; if it fails, it doesn't:
    ```
    git fetch origin <BASE_SHA> <HEAD_SHA>
    ```
-   If this fails, the origin remote doesn't contain this PR/MR's history — tell the user their clone is of an unrelated repo and stop.
+   **If this fails, stop immediately and tell the user their current working directory is not a clone of the repository that the PR/MR targets.** Ask them to `cd` to the correct clone and re-run the skill. Do **not** try to locate the correct clone elsewhere on disk, do **not** add additional remotes, do **not** substitute `git -C <other_path>` for the rest of the flow — just fail cleanly with a clear message and let the user move. The fetch-based check is the single source of truth for "is this the right repo".
    
    **This deliberately does not check that the origin URL textually matches the PR/MR URL.** Mirrored setups (a project hosted canonically on one platform with a mirror on the other, multi-remote workflows, forks used as origin) all work as long as the commit SHAs exist on the origin remote, which is what the fetch actually verifies. Fork-based PRs on GitHub and GitLab also work without a fallback: both platforms advertise PR/MR heads via `refs/pull/<N>/head` / `refs/merge-requests/<N>/head` and enable reachable-SHA fetching, so the direct `git fetch origin <SHA>` resolves even when the SHA isn't on any branch.
 5. **Recompute `BASE_SHA` as the real merge-base** of base and head:
@@ -222,11 +220,43 @@ glab api "projects/${PROJECT_ID}/merge_requests/<number>/versions" \
   2>/tmp/glab_stderr > /tmp/versions.json
 ```
 
-The position SHAs for inline draft notes are `.[0].base_commit_sha`, `.[0].start_commit_sha`, and `.[0].head_commit_sha` from the versions file (latest version first). For each inline comment, write a JSON file:
+The position SHAs for inline draft notes are `.[0].base_commit_sha`, `.[0].start_commit_sha`, and `.[0].head_commit_sha` from the versions file (latest version first). **On an MR with exactly one version** (no force-pushes, no extra pushes after the MR was opened), these position SHAs coincide exactly with the review-range `BASE_SHA` / `HEAD_SHA` — they look identical and the distinction seems cosmetic. On an MR with multiple versions they diverge. Treat them as distinct values regardless, so the same code works for both cases — do not reuse the review-range variables as if they were the position SHAs.
+
+For each inline comment, compose the JSON body with `jq --rawfile`. The comment body is multi-line markdown (backticks, code fences, quoted excerpts, em-dashes, nested blockquotes) and embedding it as a JSON string literal by hand is a quoting nightmare. Write the markdown to a file first, then let jq do the encoding:
+
+```bash
+# 1. Write the comment body as plain markdown.
+cat > /tmp/note.md <<'MARKDOWN_EOF'
+**[severity]** <comment text with `backticks`, em-dashes, code blocks, etc.>
+MARKDOWN_EOF
+
+# 2. Build the JSON with jq --rawfile for the note body and
+#    --arg / --argjson for the position fields (never hand-type them):
+jq -n \
+  --rawfile note /tmp/note.md \
+  --arg base_sha  "<versions[0].base_commit_sha>" \
+  --arg start_sha "<versions[0].start_commit_sha>" \
+  --arg head_sha  "<versions[0].head_commit_sha>" \
+  --arg new_path  "<file path>" \
+  --argjson new_line <line number in the new version of the file> \
+  '{
+    note: $note,
+    position: {
+      base_sha: $base_sha,
+      start_sha: $start_sha,
+      head_sha: $head_sha,
+      position_type: "text",
+      new_path: $new_path,
+      new_line: $new_line
+    }
+  }' > /tmp/note.json
+```
+
+The resulting JSON has the shape:
 
 ```json
 {
-  "note": "**[severity]** <comment text>",
+  "note": "**[severity]** ...",
   "position": {
     "base_sha":  "<versions[0].base_commit_sha>",
     "start_sha": "<versions[0].start_commit_sha>",
@@ -254,6 +284,7 @@ For general (not-line-specific) draft notes, omit the `position` object — just
 - **Never pipe `glab api` into a JSON parser via `2>&1`.** glab writes non-fatal warnings to stderr (SSH `known_hosts` updates, config-file write failures under sandboxed filesystems). Mixed into stdout, they silently break JSON parsing *after* the POST has already succeeded on the server. Always redirect stdout to a file and stderr elsewhere (`2>/dev/null` or `2>/tmp/glab_stderr`); the exit code is the only reliable signal of whether the POST landed.
 - **`draft_notes` POST is not idempotent.** If the response parse fails but the POST succeeded server-side, a naive retry creates a duplicate. Before retrying, list existing drafts (`glab api "projects/${PROJECT_ID}/merge_requests/<number>/draft_notes"`) and skip any that already match the new draft's `new_path` + `new_line` + opening line of `note`.
 - **Create drafts sequentially**, not in parallel. Parallel creation amplifies the partial-failure problem and makes deduplication harder.
+- **POST response for newly-created drafts has several `null` fields.** The response to a `POST .../draft_notes` returns `note_type: null`, `author: null`, `line_code: null`, and `resolvable: null` for a freshly-created draft — these only get populated once the review is submitted. Verify the POST succeeded by checking the command's exit code and the presence of a numeric `id` in the response, not by inspecting those fields.
 - **No `--jq` flag on glab** — pipe to `jq` instead. **No `--hostname` for `glab api`** — the host comes from `~/.config/glab-cli/config.yml`.
 
 **Line numbers**: `new_line` must be a line visible on the **new** side of the diff (a context line or a `+` added line). For comments on deleted lines, use `old_line` instead. The line must actually appear in the diff — GitLab rejects positions that point at lines outside the diff hunks.
